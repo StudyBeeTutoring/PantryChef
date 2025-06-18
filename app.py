@@ -1,4 +1,4 @@
-# app.py (Upgraded Cloud Deployment Version)
+# app.py (Professional Overhaul Cloud Version)
 import streamlit as st
 import pandas as pd
 import joblib
@@ -14,13 +14,10 @@ st.set_page_config(
 )
 
 # --- LOAD ASSETS (FROM GITHUB RELEASES URLS) ---
-# Caching is essential for performance, so Streamlit doesn't re-download these large files on every interaction.
-
 @st.cache_data
 def load_data():
     """Loads the de-duplicated and cleaned recipe dataset from a raw GitHub URL."""
-    # --- IMPORTANT: PASTE THE GITHUB RELEASE URL FOR YOUR CSV FILE HERE ---
-    DATA_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v1.5.0/recipes_cleaned.csv"
+    DATA_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v2.0.0/recipes_cleaned.csv"
     
     try:
         df = pd.read_csv(DATA_URL)
@@ -32,38 +29,49 @@ def load_data():
         return None
 
 @st.cache_resource
-def load_model():
-    """Loads the upgraded trained model and columns from raw GitHub URLs."""
-    # --- IMPORTANT: PASTE THE GITHUB RELEASE URLS FOR YOUR NEW MODEL FILES HERE ---
-    MODEL_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v1.5.0/pantry_chef_model.joblib"
-    COLUMNS_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v1.5.0/model_columns.joblib"
+def load_model_assets():
+    """Loads the model, scaler, and columns from raw GitHub URLs."""
+    MODEL_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v2.0.0/pantry_chef_model.joblib"
+    COLUMNS_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v2.0.0/model_columns.joblib"
+    SCALER_URL = "https://github.com/StudyBeeTutoring/PantryChef/releases/download/v2.0.0/scaler.joblib"
     
     try:
-        response = requests.get(MODEL_URL)
-        response.raise_for_status()
+        # Download model file
+        response_model = requests.get(MODEL_URL)
+        response_model.raise_for_status()
         with open("pantry_chef_model.joblib", "wb") as f:
-            f.write(response.content)
+            f.write(response_model.content)
             
-        response = requests.get(COLUMNS_URL)
-        response.raise_for_status()
+        # Download columns file
+        response_cols = requests.get(COLUMNS_URL)
+        response_cols.raise_for_status()
         with open("model_columns.joblib", "wb") as f:
-            f.write(response.content)
+            f.write(response_cols.content)
 
+        # Download scaler file
+        response_scaler = requests.get(SCALER_URL)
+        response_scaler.raise_for_status()
+        with open("scaler.joblib", "wb") as f:
+            f.write(response_scaler.content)
+
+        # Load the assets from the temporary local files
         model = joblib.load("pantry_chef_model.joblib")
         model_cols = joblib.load("model_columns.joblib")
+        scaler = joblib.load("scaler.joblib")
         
-        return model, model_cols
+        return model, model_cols, scaler
     except Exception as e:
-        st.error(f"Error loading model from URL: {e}")
-        st.error(f"Please check the URLs in your app.py: {MODEL_URL}, {COLUMNS_URL}")
-        return None, None
+        st.error(f"Error loading model assets: {e}")
+        st.error(f"Please check the URLs in your app.py for the model, columns, and scaler files.")
+        return None, None, None
 
+# Load all assets at the start of the app
 recipes_df = load_data()
-model, model_columns = load_model()
+model, model_columns, scaler = load_model_assets()
 
 # --- UI & APP LOGIC ---
 st.title("🍳 PantryChef AI")
-st.markdown("Got ingredients? Don't know what to cook? **Enter what you have below, separated by commas,** and let AI find the best recipes for you!")
+st.markdown("Tired of wondering what to cook? **Enter your ingredients below, separated by commas,** and let our AI find the perfect recipe for you!")
 
 user_input = st.text_area(
     "Enter the ingredients you have in your pantry:",
@@ -73,21 +81,20 @@ user_input = st.text_area(
 )
 
 if st.button("Find Recipes!", type="primary", use_container_width=True):
-    if recipes_df is None or model is None:
-        st.error("The application's data or model failed to load. Please check the deployment settings.")
+    if recipes_df is None or model is None or scaler is None:
+        st.error("The application's core components failed to load. Please refresh or contact support.")
     elif not user_input.strip():
         st.warning("Please enter some ingredients to get started.")
     else:
         user_ingredients = set([item.strip().lower() for item in user_input.split(',')])
-        st.write(f"**Searching for recipes with your {len(user_ingredients)} ingredients...**")
+        st.write(f"**Analyzing your {len(user_ingredients)} ingredients...**")
         
-        # --- UPGRADED FILTERING LOGIC ---
         candidate_recipes = []
         for index, recipe in recipes_df.iterrows():
             recipe_ingredients = set(recipe['ingredients_list'])
             common_ingredients = user_ingredients.intersection(recipe_ingredients)
             
-            # Stricter Rule: Only consider recipes where we have at least 25% of the ingredients
+            # Stricter Rule: Only consider recipes where user has at least 25% of the ingredients
             match_percentage = len(common_ingredients) / len(recipe_ingredients) if len(recipe_ingredients) > 0 else 0
             if match_percentage >= 0.25:
                 candidate_recipes.append(recipe)
@@ -95,15 +102,12 @@ if st.button("Find Recipes!", type="primary", use_container_width=True):
         if not candidate_recipes:
             st.error("Couldn't find a good match. Try adding more common items like 'salt', 'pepper', or 'olive oil'.")
         else:
-            # --- UPGRADED RANKING LOGIC ---
             candidates_df = pd.DataFrame(candidate_recipes)
 
-            # This function must now calculate the NEW features our upgraded model was trained on
             def calculate_features(row):
                 recipe_ingredients = set(row['ingredients_list'])
                 common_ingredients = user_ingredients.intersection(recipe_ingredients)
                 
-                # These features must match the new model's training columns
                 common_count = len(common_ingredients)
                 match_pct = common_count / len(recipe_ingredients) if len(recipe_ingredients) > 0 else 0
                 
@@ -112,7 +116,12 @@ if st.button("Find Recipes!", type="primary", use_container_width=True):
             features_df = candidates_df.apply(calculate_features, axis=1)
             features_df.columns = model_columns
             
-            predictions = model.predict(features_df)
+            # --- CRUCIAL STEP: SCALE THE FEATURES ---
+            # The model was trained on scaled data, so we must scale live data too.
+            features_scaled = scaler.transform(features_df)
+            
+            # Predict using the SCALED features
+            predictions = model.predict(features_scaled)
             candidates_df['predicted_score'] = predictions
 
             sorted_recipes = candidates_df.sort_values(by='predicted_score', ascending=False)
@@ -128,7 +137,7 @@ if st.button("Find Recipes!", type="primary", use_container_width=True):
                 
                 col1, col2 = st.columns([1, 1.5])
                 with col1:
-                    st.metric("Match Quality", f"{recipe['predicted_score']:.0f}")
+                    st.metric("Match Score", f"{int(recipe['predicted_score'])}")
                 with col2:
                     st.metric("Missing Ingredients", f"{len(missing_ingredients)}")
 
